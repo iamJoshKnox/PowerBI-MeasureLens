@@ -10,6 +10,7 @@
     <RootNamespace>PbiMeasureLens</RootNamespace>
     <Version>0.1.0</Version>
     <Product>PBI Measure Lens</Product>
+    <ApplicationIcon>appicon.ico</ApplicationIcon>
     <!-- Default platform for single-file self-contained publish; flags passed on the publish command. -->
     <RuntimeIdentifier Condition="'$(PublishSingleFile)' == 'true'">win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>

@@ -43,13 +43,19 @@ if (-not (Test-Path $toolsDir)) {
     New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 }
 
-$json = [ordered]@{
+$map = [ordered]@{
     version     = "0.1.0"
     name        = "PBI Measure Lens"
     description = "Show original-vs-display field names for a report's visuals, and a measure's recursive DAX dependency tree."
     path        = $ExePath
     arguments   = ""
-} | ConvertTo-Json
+}
+
+# Optional ribbon icon (base64 data-URI produced by tooling\build-icon.ps1).
+$iconFile = Join-Path $PSScriptRoot "icon-base64.txt"
+if (Test-Path $iconFile) { $map.iconData = (Get-Content $iconFile -Raw).Trim() }
+
+$json = $map | ConvertTo-Json
 
 $target = Join-Path $toolsDir "PbiMeasureLens.pbitool.json"
 # Write UTF-8 without BOM (Power BI's external-tool loader is picky about a leading BOM).

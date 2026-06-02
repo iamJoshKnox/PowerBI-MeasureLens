@@ -12,6 +12,9 @@
 *.jpg
 *.jpeg
 
+# --- Raw brand source (the composited logo ships inside src/.../appicon.ico) ---
+*.svg
+
 # --- .NET build output ---
 bin/
 obj/
