@@ -34,9 +34,30 @@ Requires the **.NET 8 SDK**.
 # Run from source
 dotnet run --project src/PbiMeasureLens
 
-# Or publish a self-contained single-file exe (end users need nothing installed)
+# Or produce both distribution builds at once
+tooling\publish.ps1
+```
+
+### Distribution builds
+
+| Build | Output | Size | Needs on target |
+|---|---|---|---|
+| **Self-contained** (compressed single file) | `publish\PbiMeasureLens.exe` | ~68 MB | Nothing — just copy & run |
+| **Framework-dependent** (single file) | `publish-fd\PbiMeasureLens.exe` | ~0.3 MB | **.NET 8 Desktop Runtime** installed |
+
+Use **self-contained** for sharing / copying to VMs (the runtime + WPF are bundled, so there are
+no prerequisites; first launch decompresses once to a temp folder). Use **framework-dependent**
+for standardized machines you know already have the .NET 8 **Desktop** Runtime
+(`winget install Microsoft.DotNet.DesktopRuntime.8`).
+
+Build them individually if you prefer:
+
+```powershell
+# Self-contained, compressed
 dotnet publish src/PbiMeasureLens -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
-# -> publish\PbiMeasureLens.exe
+
+# Framework-dependent
+dotnet publish src/PbiMeasureLens -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=false -o publish-fd
 ```
 
 ## Register in the External Tools ribbon (optional)

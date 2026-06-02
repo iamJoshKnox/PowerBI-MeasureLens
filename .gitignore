@@ -19,7 +19,7 @@
 bin/
 obj/
 *.user
-publish/
+publish*/
 dist/
 
 # --- IDE / OS ---
