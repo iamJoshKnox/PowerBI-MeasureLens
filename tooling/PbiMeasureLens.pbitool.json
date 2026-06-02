@@ -1,0 +1,7 @@
+{
+  "version": "0.1.0",
+  "name": "PBI Measure Lens",
+  "description": "Show original-vs-display field names for a report's visuals, and a measure's recursive DAX dependency tree.",
+  "path": "REPLACED_BY_INSTALL_SCRIPT",
+  "arguments": ""
+}

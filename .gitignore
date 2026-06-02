@@ -1,0 +1,27 @@
+# --- Power BI working files (never commit user reports/models) ---
+*.pbix
+*.pbip
+*.pbit
+*.SemanticModel/
+*.Report/
+**/.pbi/localSettings.json
+**/.pbi/cache.abf
+
+# --- Screenshots / scratch images (may contain real data) ---
+*.png
+*.jpg
+*.jpeg
+
+# --- .NET build output ---
+bin/
+obj/
+*.user
+publish/
+dist/
+
+# --- IDE / OS ---
+.vs/
+.idea/
+*.suo
+Thumbs.db
+desktop.ini

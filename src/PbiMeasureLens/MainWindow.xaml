@@ -1,0 +1,137 @@
+<Window x:Class="PbiMeasureLens.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:m="clr-namespace:PbiMeasureLens.Models"
+        Title="PBI Measure Lens" Height="740" Width="1180"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="4" />
+            <Setter Property="Padding" Value="4" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" Background="#F3F3F3" BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="6">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Open .pbix…" Click="OpenPbix_Click" />
+                    <TextBlock x:Name="PbixPathText" VerticalAlignment="Center" Margin="6,0,0,0"
+                               Foreground="#444" Text="(no report loaded)" TextTrimming="CharacterEllipsis" MaxWidth="760" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <Button Content="Add model folder…" Click="AddModelFolder_Click" />
+                    <Button Content="Clear" Click="ClearModelFolders_Click" />
+                    <TextBlock x:Name="ModelInfoText" VerticalAlignment="Center" Margin="6,0,0,0"
+                               Foreground="#444" Text="No semantic-model folders configured." TextTrimming="CharacterEllipsis" MaxWidth="820" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Grid Margin="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320" MinWidth="200" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" MinWidth="260" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="1.2*" MinWidth="280" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Visuals -->
+            <GroupBox Grid.Column="0" Header="Visuals">
+                <ListBox x:Name="VisualsList" SelectionChanged="VisualsList_SelectionChanged"
+                         HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type m:VisualInfo}">
+                            <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Margin="2" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="2,6,2,2"
+                                               Foreground="#2A6" />
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListBox.GroupStyle>
+                </ListBox>
+            </GroupBox>
+
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="#EEE" />
+
+            <!-- Fields -->
+            <GroupBox Grid.Column="2" Header="Fields in selected visual">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
+                        <Button Content="Copy table" Click="Copy_Click" />
+                        <Button Content="Export CSV…" Click="ExportCsv_Click" />
+                    </StackPanel>
+                    <DataGrid x:Name="FieldsGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                              SelectionMode="Single" SelectionChanged="FieldsGrid_SelectionChanged"
+                              GridLinesVisibility="Horizontal" HeadersVisibility="Column"
+                              CanUserAddRows="False">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Original measure / column" Binding="{Binding OriginalName}" Width="*" />
+                            <DataGridTextColumn Header="Display name" Binding="{Binding DisplayName}" Width="*" />
+                            <DataGridTextColumn Header="Kind" Binding="{Binding KindText}" Width="70" />
+                            <DataGridTextColumn Header="Renamed" Binding="{Binding RenamedText}" Width="70" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </GroupBox>
+
+            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch" Background="#EEE" />
+
+            <!-- DAX + dependency tree -->
+            <GroupBox Grid.Column="4" Header="Measure DAX &amp; dependencies">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" MinHeight="80" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="1.4*" MinHeight="120" />
+                    </Grid.RowDefinitions>
+
+                    <TextBox x:Name="DaxText" Grid.Row="0" IsReadOnly="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" AcceptsReturn="True"
+                             FontFamily="Cascadia Mono, Consolas, monospace" FontSize="12"
+                             Text="Select a measure in the Fields grid to see its DAX." />
+
+                    <TextBlock Grid.Row="1" Text="Dependency tree" FontWeight="Bold" Margin="2,6,2,2" Foreground="#666" />
+
+                    <TreeView x:Name="DepTree" Grid.Row="2" SelectedItemChanged="DepTree_SelectedItemChanged">
+                        <TreeView.Resources>
+                            <HierarchicalDataTemplate DataType="{x:Type m:MeasureNode}" ItemsSource="{Binding Children}">
+                                <TextBlock Text="{Binding Display}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Column">
+                                                    <Setter Property="Foreground" Value="#666" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Unresolved">
+                                                    <Setter Property="Foreground" Value="#C00" />
+                                                    <Setter Property="FontStyle" Value="Italic" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Cycle">
+                                                    <Setter Property="Foreground" Value="#E07000" />
+                                                    <Setter Property="FontStyle" Value="Italic" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </HierarchicalDataTemplate>
+                        </TreeView.Resources>
+                    </TreeView>
+                </Grid>
+            </GroupBox>
+        </Grid>
+    </DockPanel>
+</Window>
