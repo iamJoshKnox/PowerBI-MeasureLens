@@ -18,7 +18,14 @@ public sealed class FieldMapping
     public string DisplayName { get; init; } = "";
     public bool IsRenamed { get; init; }
 
+    // Report context (set when the visual is parsed) — enables whole-report audit and footprint views.
+    public string Page { get; set; } = "";
+    public string VisualType { get; set; } = "";
+    public string VisualId { get; set; } = "";
+    public string VisualTitle { get; set; } = "";
+
     public string KindText => Kind == FieldKind.Measure ? "Measure" : "Column";
     public string RenamedText => IsRenamed ? "Yes" : "";
     public string Qualified => string.IsNullOrEmpty(Table) ? OriginalName : $"{Table}[{OriginalName}]";
+    public string VisualLabel => string.IsNullOrWhiteSpace(VisualTitle) ? VisualType : VisualTitle;
 }

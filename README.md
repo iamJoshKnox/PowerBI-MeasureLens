@@ -5,10 +5,15 @@ A lightweight Power BI Desktop helper for two everyday auditing pains:
 1. **See the real measure behind a renamed visual field.** When a measure is dropped into a
    visual and given a friendlier header, the original name is only visible on hover. PBI Measure
    Lens lists every visual in a report and shows each field's **original name → display name**,
-   with one-click **copy** (Excel-pasteable) and **CSV export**.
+   with one-click **copy** (Excel-pasteable) and **CSV export**. A **whole-report** toggle plus
+   **search** and **"only renamed"** filters turn this into a full rename audit across all pages.
 2. **Trace a measure's DAX without spelunking the model.** Pick a measure and see its DAX plus a
    **recursive dependency tree** — the measures it references, the measures *those* reference, and
-   so on — read directly from your local `.pbip` semantic model files (works across chained models).
+   so on — read directly from your local `.pbip` semantic model files. It resolves references
+   **across chained/composite models** and labels each measure with the **source model** it lives in.
+3. **See a measure's footprint.** For any measure, the **Footprint** tab shows every visual/page
+   that displays it (and the display name used in each — flagging when it's **renamed
+   inconsistently across pages**), plus which **other measures reference it** (reverse lineage).
 
 It runs as a standalone `.exe` and can register itself in the **External Tools** ribbon.
 

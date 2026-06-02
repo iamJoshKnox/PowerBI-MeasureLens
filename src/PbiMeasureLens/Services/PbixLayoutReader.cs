@@ -121,7 +121,12 @@ public static class PbixLayoutReader
             foreach (var sel in select.EnumerateArray())
             {
                 var fm = ParseSelect(sel, aliasToEntity, columnProps);
-                if (fm != null) vi.Fields.Add(fm);
+                if (fm == null) continue;
+                fm.Page = page;
+                fm.VisualType = vi.VisualType;
+                fm.VisualId = vi.VisualId;
+                fm.VisualTitle = vi.Title;
+                vi.Fields.Add(fm);
             }
         }
 

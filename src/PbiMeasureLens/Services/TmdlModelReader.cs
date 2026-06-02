@@ -12,6 +12,7 @@ public sealed class MeasureDef
     public string Table { get; init; } = "";
     public string Expression { get; init; } = "";
     public string SourceFile { get; init; } = "";
+    public string ModelName { get; init; } = "";
 }
 
 /// <summary>
@@ -50,8 +51,9 @@ public static class TmdlModelReader
                 if (!Directory.Exists(tablesDir)) continue;
 
                 model.ScannedModelFolders.Add(md);
+                string modelName = ModelNameFromDir(md);
                 foreach (var file in Directory.EnumerateFiles(tablesDir, "*.tmdl"))
-                    ParseFile(file, model);
+                    ParseFile(file, model, modelName);
             }
         }
         return model;
@@ -75,7 +77,17 @@ public static class TmdlModelReader
         return found.Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
-    private static void ParseFile(string path, TmdlModel model)
+    /// <summary>Friendly model name from a *.SemanticModel folder (drops the .SemanticModel suffix).</summary>
+    private static string ModelNameFromDir(string modelDir)
+    {
+        var name = Path.GetFileName(modelDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        const string suffix = ".SemanticModel";
+        return name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? name.Substring(0, name.Length - suffix.Length)
+            : name;
+    }
+
+    private static void ParseFile(string path, TmdlModel model, string modelName)
     {
         string[] lines;
         try { lines = File.ReadAllLines(path); }
@@ -136,7 +148,8 @@ public static class TmdlModelReader
                         Name = name,
                         Table = currentTable,
                         Expression = expr,
-                        SourceFile = path
+                        SourceFile = path,
+                        ModelName = modelName
                     };
                     if (!model.MeasuresByName.TryGetValue(name, out var list))
                         model.MeasuresByName[name] = list = new List<MeasureDef>();

@@ -29,6 +29,7 @@ public static class DependencyResolver
             Name = root.Name,
             Table = root.Table,
             Expression = root.Expression,
+            SourceModel = root.ModelName,
             Kind = DependencyKind.Measure
         };
         BuildChildren(node, root, model, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { root.Name });
@@ -62,6 +63,7 @@ public static class DependencyResolver
                         Name = m.Name,
                         Table = m.Table,
                         Expression = m.Expression,
+                        SourceModel = m.ModelName,
                         Kind = DependencyKind.Measure
                     };
                     BuildChildren(child, m, model, new HashSet<string>(path, StringComparer.OrdinalIgnoreCase) { m.Name });
@@ -77,6 +79,28 @@ public static class DependencyResolver
                 node.Children.Add(new MeasureNode { Name = r.Name, Kind = DependencyKind.Unresolved });
             }
         }
+    }
+
+    /// <summary>Measures whose DAX references <paramref name="measureName"/> (reverse dependency / where-used in the model).</summary>
+    public static IReadOnlyList<MeasureDef> FindReferencingMeasures(string measureName, TmdlModel model)
+    {
+        var result = new List<MeasureDef>();
+        foreach (var list in model.MeasuresByName.Values)
+        {
+            foreach (var def in list)
+            {
+                if (string.Equals(def.Name, measureName, StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (var r in ExtractRefs(def.Expression))
+                {
+                    if (!r.HasTable && string.Equals(r.Name, measureName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Add(def);
+                        break;
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     private readonly record struct Ref(string Table, string Name, bool HasTable)

@@ -16,6 +16,7 @@ public sealed class MeasureNode
     public string Name { get; init; } = "";
     public string Table { get; init; } = "";
     public string Expression { get; init; } = "";
+    public string SourceModel { get; init; } = "";
     public DependencyKind Kind { get; init; }
     public ObservableCollection<MeasureNode> Children { get; } = new();
 
