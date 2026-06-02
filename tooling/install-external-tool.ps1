@@ -52,7 +52,8 @@ $json = [ordered]@{
 } | ConvertTo-Json
 
 $target = Join-Path $toolsDir "PbiMeasureLens.pbitool.json"
-$json | Out-File -FilePath $target -Encoding utf8
+# Write UTF-8 without BOM (Power BI's external-tool loader is picky about a leading BOM).
+[System.IO.File]::WriteAllText($target, $json, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host "Registered PBI Measure Lens ->" $target
 Write-Host "Restart Power BI Desktop; the button appears under the External Tools ribbon."
