@@ -15,12 +15,29 @@ public sealed class PbixReadException : Exception
 }
 
 /// <summary>
+/// Outcome of reading a report layout: the visuals it understood, plus diagnostics so the
+/// caller can tell "clean report" apart from "parsed nothing because the format changed."
+/// </summary>
+public sealed class PbixReadResult
+{
+    public List<VisualInfo> Visuals { get; init; } = new();
+    /// <summary>Containers that carried a recognised data visual (singleVisual schema).</summary>
+    public int DataVisuals { get; init; }
+    /// <summary>Containers whose config JSON could not be parsed and were skipped.</summary>
+    public int SkippedMalformed { get; init; }
+    /// <summary>Containers using Power BI's newer visual schema this reader can't decode yet.</summary>
+    public int UnknownSchema { get; init; }
+    /// <summary>A user-facing heads-up when results are likely incomplete; null when clean.</summary>
+    public string? Warning { get; init; }
+}
+
+/// <summary>
 /// Reads the classic .pbix report layout (Report/Layout — UTF-16 JSON with nested,
 /// escaped-JSON config strings) and extracts each visual's field rename mappings.
 /// </summary>
 public static class PbixLayoutReader
 {
-    public static List<VisualInfo> ReadVisuals(string pbixPath)
+    public static PbixReadResult ReadVisuals(string pbixPath)
     {
         if (!File.Exists(pbixPath))
             throw new PbixReadException($"File not found:\n{pbixPath}");
@@ -31,9 +48,9 @@ public static class PbixLayoutReader
             using var zip = ZipFile.OpenRead(pbixPath);
             var entry = zip.GetEntry("Report/Layout")
                 ?? throw new PbixReadException(
-                    "This .pbix has no Report/Layout entry.\n\n" +
-                    "It may be a thin/Service-only file, or a .pbip report (folder format), " +
-                    "which isn't supported yet.");
+                    "This .pbix has no classic Report/Layout entry.\n\n" +
+                    "If it uses the newer PBIR format, open it via ReportReader (which auto-detects " +
+                    "and reads PBIR); this path handles the classic layout only.");
             using var s = entry.Open();
             using var ms = new MemoryStream();
             s.CopyTo(ms);
@@ -45,11 +62,13 @@ public static class PbixLayoutReader
         }
 
         var visuals = new List<VisualInfo>();
+        int dataVisuals = 0, skipped = 0, unknownSchema = 0;
+
         using var doc = JsonDocument.Parse(layoutJson);
         var root = doc.RootElement;
 
         if (!root.TryGetProperty("sections", out var sections) || sections.ValueKind != JsonValueKind.Array)
-            return visuals;
+            return new PbixReadResult();
 
         foreach (var section in sections.EnumerateArray())
         {
@@ -67,27 +86,57 @@ public static class PbixLayoutReader
 
                 try
                 {
-                    var vi = ParseVisual(configStr, page, ordinal);
-                    if (vi != null) visuals.Add(vi);
+                    using var cfgDoc = JsonDocument.Parse(configStr);
+                    var config = cfgDoc.RootElement;
+
+                    if (config.TryGetProperty("singleVisual", out var sv) && sv.ValueKind == JsonValueKind.Object)
+                    {
+                        var vi = ParseVisual(config, sv, page, ordinal);
+                        visuals.Add(vi);
+                        if (vi.Fields.Count > 0) dataVisuals++;
+                    }
+                    else if (config.TryGetProperty("visual", out var nv) && nv.ValueKind == JsonValueKind.Object)
+                    {
+                        // Power BI's newer ("enhanced") visual schema — different shape we don't decode yet.
+                        unknownSchema++;
+                    }
+                    // else: group/shape/textbox container with no projected data — nothing to report.
                 }
                 catch (JsonException)
                 {
-                    // skip a malformed visual rather than failing the whole report
+                    skipped++; // skip a malformed visual rather than failing the whole report
                 }
             }
         }
 
-        return visuals.OrderBy(v => v.PageOrdinal).ToList();
+        return new PbixReadResult
+        {
+            Visuals = visuals.OrderBy(v => v.PageOrdinal).ToList(),
+            DataVisuals = dataVisuals,
+            SkippedMalformed = skipped,
+            UnknownSchema = unknownSchema,
+            Warning = BuildWarning(visuals.Count, unknownSchema, skipped)
+        };
     }
 
-    private static VisualInfo? ParseVisual(string configJson, string page, int ordinal)
+    private static string? BuildWarning(int parsed, int unknownSchema, int skipped)
     {
-        using var doc = JsonDocument.Parse(configJson);
-        var config = doc.RootElement;
-        string visualId = GetString(config, "name") ?? "";
+        if (unknownSchema > 0 && parsed == 0)
+            return $"This report uses Power BI's newer visual format ({unknownSchema} visual(s)), " +
+                   "which this version of PBI Measure Lens can't read yet. No field-rename info is available.\n\n" +
+                   "Re-save with the classic visual layout, or check for an updated build.";
+        if (unknownSchema > 0)
+            return $"{unknownSchema} visual(s) use Power BI's newer format and were skipped; " +
+                   "the field list below may be incomplete.";
+        if (skipped > 0)
+            return $"{skipped} visual(s) had unreadable config and were skipped; " +
+                   "the field list below may be incomplete.";
+        return null;
+    }
 
-        if (!config.TryGetProperty("singleVisual", out var sv) || sv.ValueKind != JsonValueKind.Object)
-            return null; // group container / non-visual
+    private static VisualInfo ParseVisual(JsonElement config, JsonElement sv, string page, int ordinal)
+    {
+        string visualId = GetString(config, "name") ?? "";
 
         var vi = new VisualInfo
         {

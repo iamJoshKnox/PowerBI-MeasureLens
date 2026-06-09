@@ -27,6 +27,7 @@ public partial class MainWindow : Window
 
         LoadModel();
         UpdateModelInfo();
+        ClearMeasureDetail();
 
         if (!string.IsNullOrEmpty(_settings.LastPbixPath) && File.Exists(_settings.LastPbixPath))
             LoadPbix(_settings.LastPbixPath);
@@ -39,7 +40,7 @@ public partial class MainWindow : Window
         var dlg = new OpenFileDialog
         {
             Title = "Open a Power BI report",
-            Filter = "Power BI report (*.pbix)|*.pbix|All files (*.*)|*.*"
+            Filter = "Power BI report (*.pbix;*.pbip;*.pbir)|*.pbix;*.pbip;*.pbir|All files (*.*)|*.*"
         };
         if (!string.IsNullOrEmpty(_settings.LastPbixPath))
             dlg.InitialDirectory = Path.GetDirectoryName(_settings.LastPbixPath) ?? "";
@@ -50,9 +51,10 @@ public partial class MainWindow : Window
 
     private void LoadPbix(string path)
     {
+        PbixReadResult result;
         try
         {
-            _visuals = PbixLayoutReader.ReadVisuals(path);
+            result = ReportReader.ReadVisuals(path);
         }
         catch (PbixReadException ex)
         {
@@ -65,18 +67,28 @@ public partial class MainWindow : Window
             return;
         }
 
+        _visuals = result.Visuals;
         _allFields = _visuals.SelectMany(v => v.Fields).ToList();
 
-        var view = new ListCollectionView(_visuals);
-        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(VisualInfo.Page)));
-        VisualsList.ItemsSource = view;
-
+        RefreshVisualsView();
         ClearMeasureDetail();
         RefreshFieldsView();
 
         PbixPathText.Text = path;
+        PbixStatusText.Text = DescribeRead(result);
+        if (result.Warning != null)
+            MessageBox.Show(result.Warning, "Report read incomplete", MessageBoxButton.OK, MessageBoxImage.Warning);
+
         _settings.LastPbixPath = path;
         SettingsStore.Save(_settings);
+    }
+
+    private static string DescribeRead(PbixReadResult r)
+    {
+        var msg = $"{r.Visuals.Count} visual(s) · {r.DataVisuals} with fields";
+        if (r.SkippedMalformed > 0) msg += $" · {r.SkippedMalformed} unreadable";
+        if (r.UnknownSchema > 0) msg += $" · {r.UnknownSchema} newer-format (skipped)";
+        return msg;
     }
 
     // ---- Semantic model folders ----
@@ -91,13 +103,74 @@ public partial class MainWindow : Window
         }
 
         if (dlg.ShowDialog() == true)
+            AddModelRoots(new[] { dlg.FolderName });
+    }
+
+    private void AddModelFile_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
         {
-            if (!_settings.SemanticModelRoots.Contains(dlg.FolderName, StringComparer.OrdinalIgnoreCase))
-                _settings.SemanticModelRoots.Add(dlg.FolderName);
-            SettingsStore.Save(_settings);
-            LoadModel();
-            UpdateModelInfo();
+            Title = "Select a semantic model (.pbip / .pbir)",
+            Filter = "Power BI model/project (*.pbip;*.pbir)|*.pbip;*.pbir|All files (*.*)|*.*"
+        };
+        if (_settings.SemanticModelRoots.Count > 0 && Directory.Exists(_settings.SemanticModelRoots[^1]))
+            dlg.InitialDirectory = _settings.SemanticModelRoots[^1];
+
+        if (dlg.ShowDialog() == true)
+        {
+            var roots = ResolveModelRootsFromFile(dlg.FileName);
+            if (roots.Count == 0)
+                MessageBox.Show(
+                    "No *.SemanticModel folder was found next to that file.\n\n" +
+                    "Pick the model's .pbip/.pbir, or use “Add model folder…”.",
+                    "No model found", MessageBoxButton.OK, MessageBoxImage.Information);
+            else
+                AddModelRoots(roots);
         }
+    }
+
+    /// <summary>Resolve the *.SemanticModel folder(s) near a selected .pbip/.pbir file.</summary>
+    private static List<string> ResolveModelRootsFromFile(string filePath)
+    {
+        string dir = Path.GetDirectoryName(filePath) ?? "";
+        var found = new List<string>();
+        if (!Directory.Exists(dir)) return found;
+
+        // Siblings first (the usual "<Name>.pbip + <Name>.SemanticModel" layout), then a shallow search.
+        try { found.AddRange(Directory.EnumerateDirectories(dir, "*.SemanticModel")); } catch { }
+        if (found.Count == 0)
+            try { found.AddRange(Directory.EnumerateDirectories(dir, "*.SemanticModel", SearchOption.AllDirectories)); } catch { }
+
+        // Fall back to the containing folder; the scanner searches it recursively.
+        return found.Count > 0 ? found.Distinct(StringComparer.OrdinalIgnoreCase).ToList() : new List<string> { dir };
+    }
+
+    private void AddModelRoots(IEnumerable<string> roots)
+    {
+        bool added = false;
+        foreach (var root in roots)
+        {
+            if (!_settings.SemanticModelRoots.Contains(root, StringComparer.OrdinalIgnoreCase))
+            {
+                _settings.SemanticModelRoots.Add(root);
+                added = true;
+            }
+        }
+        if (!added) return;
+
+        SettingsStore.Save(_settings);
+        LoadModel();
+        UpdateModelInfo();
+    }
+
+    private void RemoveModel_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string path }) return;
+        _settings.SemanticModelRoots.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+        SettingsStore.Save(_settings);
+        LoadModel();
+        UpdateModelInfo();
+        ClearMeasureDetail();
     }
 
     private void ClearModelFolders_Click(object sender, RoutedEventArgs e)
@@ -113,6 +186,10 @@ public partial class MainWindow : Window
 
     private void UpdateModelInfo()
     {
+        ModelChips.ItemsSource = _settings.SemanticModelRoots
+            .Select(p => new ModelRootItem { Path = p, Name = NiceModelName(p) })
+            .ToList();
+
         if (_settings.SemanticModelRoots.Count == 0)
         {
             ModelInfoText.Text = "No semantic-model folders configured (DAX lookup disabled).";
@@ -122,8 +199,35 @@ public partial class MainWindow : Window
         int models = _model?.ScannedModelFolders.Count ?? 0;
         int measures = _model?.MeasureCount ?? 0;
         ModelInfoText.Text =
-            $"{_settings.SemanticModelRoots.Count} root(s) · {models} semantic model(s) · {measures} measure(s) — " +
-            string.Join("; ", _settings.SemanticModelRoots);
+            $"{_settings.SemanticModelRoots.Count} root(s) · {models} model(s) · {measures} measure(s)";
+    }
+
+    private static string NiceModelName(string path)
+    {
+        var name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        const string suffix = ".SemanticModel";
+        if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            name = name[..^suffix.Length];
+        return string.IsNullOrEmpty(name) ? path : name;
+    }
+
+    // ---- Visuals list ----
+
+    private void RefreshVisualsView()
+    {
+        IEnumerable<VisualInfo> source = HideSlicers.IsChecked == true
+            ? _visuals.Where(v => !v.IsSlicer)
+            : _visuals;
+
+        var view = new ListCollectionView(source.ToList());
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(VisualInfo.Page)));
+        VisualsList.ItemsSource = view;
+    }
+
+    private void HideSlicers_Changed(object sender, RoutedEventArgs e)
+    {
+        RefreshVisualsView();
+        RefreshFieldsView();
     }
 
     // ---- Fields grid: source + filtering ----
@@ -135,9 +239,13 @@ public partial class MainWindow : Window
     private void RefreshFieldsView()
     {
         bool whole = WholeReport.IsChecked == true;
+        bool hideSlicers = HideSlicers.IsChecked == true;
         IEnumerable<FieldMapping> source = whole
             ? _allFields
             : (VisualsList.SelectedItem as VisualInfo)?.Fields ?? Enumerable.Empty<FieldMapping>();
+
+        if (whole && hideSlicers)
+            source = source.Where(f => f.VisualType.IndexOf("slicer", StringComparison.OrdinalIgnoreCase) < 0);
 
         string search = SearchBox.Text?.Trim() ?? "";
         bool onlyRenamed = OnlyRenamed.IsChecked == true;
@@ -150,7 +258,7 @@ public partial class MainWindow : Window
                 if (onlyRenamed && !f.IsRenamed) return false;
                 if (search.Length == 0) return true;
                 return Contains(f.OriginalName, search) || Contains(f.DisplayName, search)
-                    || Contains(f.Page, search) || Contains(f.VisualLabel, search);
+                    || Contains(f.Page, search) || Contains(f.VisualLabel, search) || Contains(f.Table, search);
             }
         };
         FieldsGrid.ItemsSource = view;
@@ -172,7 +280,7 @@ public partial class MainWindow : Window
         if (field.Kind != FieldKind.Measure)
         {
             DepTree.ItemsSource = null;
-            DaxText.Text = $"\"{field.OriginalName}\" is a column — columns have no DAX expression.";
+            ShowDaxMessage($"\"{field.Qualified}\" is a column — columns have no DAX expression.");
             ShowFootprint(field.OriginalName); // still useful: where else is this displayed
             return;
         }
@@ -180,22 +288,21 @@ public partial class MainWindow : Window
         if (_model == null || _model.MeasureCount == 0)
         {
             DepTree.ItemsSource = null;
-            DaxText.Text =
+            ShowDaxMessage(
                 "No semantic-model measures loaded.\n\n" +
-                "Use “Add model folder…” above and point it at the OneDrive folder that " +
-                "contains your .pbip semantic model(s).";
+                "Use “Add model folder…” or “Add model file…” above and point at the folder(s) that " +
+                "contain your .pbip semantic model(s).");
         }
         else
         {
             var root = DependencyResolver.Build(field.OriginalName, _model);
             DepTree.ItemsSource = new[] { root };
-            DaxText.Text = root.Kind == DependencyKind.Unresolved
-                ? $"Measure \"{field.OriginalName}\" was not found in the configured semantic model(s).\n\n" +
-                  "It may live in a Service-only model that isn't on disk, or under a different name."
-                : DescribeMeasure(root);
-
-            if (_model.HasDuplicate(field.OriginalName))
-                DaxText.Text += "\n\n⚠ Note: more than one measure named this exists across the scanned models; showing the first.";
+            if (root.Kind == DependencyKind.Unresolved)
+                ShowDaxMessage(
+                    $"Measure \"{field.OriginalName}\" was not found in the configured semantic model(s).\n\n" +
+                    "It may live in a Service-only model that isn't on disk, or under a different name.");
+            else
+                ShowDaxMeasure(root);
         }
 
         ShowFootprint(field.OriginalName);
@@ -205,7 +312,7 @@ public partial class MainWindow : Window
     {
         if (e.NewValue is MeasureNode node && node.IsMeasure)
         {
-            DaxText.Text = DescribeMeasure(node);
+            ShowDaxMeasure(node);
             ShowFootprint(node.Name);
         }
     }
@@ -248,17 +355,25 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string DescribeMeasure(MeasureNode node)
+    private void ShowDaxMessage(string message) => DaxBox.Document = DaxHighlighter.BuildMessage(message);
+
+    private void ShowDaxMeasure(MeasureNode node)
     {
-        var header = string.IsNullOrEmpty(node.Table) ? $"[{node.Name}]" : $"{node.Table}[{node.Name}]";
+        var header = (string.IsNullOrEmpty(node.Table) ? $"[{node.Name}]" : $"{node.Table}[{node.Name}]") + " =";
         if (!string.IsNullOrEmpty(node.SourceModel)) header += $"   (model: {node.SourceModel})";
-        return $"{header} =\n\n{node.Expression}";
+
+        string? note = node.IsAmbiguous
+            ? $"⚠ {node.DefinitionCount} measures share this name across the scanned models; " +
+              $"showing the one from {(string.IsNullOrEmpty(node.SourceModel) ? "the first model" : node.SourceModel)}."
+            : null;
+
+        DaxBox.Document = DaxHighlighter.BuildMeasure(header, node.Expression, note);
     }
 
     private void ClearMeasureDetail()
     {
         DepTree.ItemsSource = null;
-        DaxText.Text = "Select a measure in the Fields grid to see its DAX.";
+        ShowDaxMessage("Select a measure in the Fields grid to see its DAX.");
         FootprintSummary.Text = "Select a measure to see where it is used across the report.";
         UsageGrid.ItemsSource = null;
         RefByList.ItemsSource = null;
@@ -272,9 +387,9 @@ public partial class MainWindow : Window
         if (rows.Count == 0) { MessageBox.Show("No rows to copy.", "Copy"); return; }
 
         var sb = new StringBuilder();
-        sb.AppendLine("Page\tVisual\tOriginal\tDisplay\tKind\tRenamed");
+        sb.AppendLine("Page\tVisual\tTable\tOriginal\tDisplay\tKind\tRenamed");
         foreach (var f in rows)
-            sb.AppendLine($"{f.Page}\t{f.VisualLabel}\t{f.OriginalName}\t{f.DisplayName}\t{f.KindText}\t{f.RenamedText}");
+            sb.AppendLine($"{f.Page}\t{f.VisualLabel}\t{f.Table}\t{f.OriginalName}\t{f.DisplayName}\t{f.KindText}\t{f.RenamedText}");
 
         try { Clipboard.SetText(sb.ToString()); }
         catch (Exception ex) { MessageBox.Show("Could not access the clipboard: " + ex.Message, "Copy"); }
@@ -294,9 +409,9 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog() != true) return;
 
         var sb = new StringBuilder();
-        sb.AppendLine("Page,Visual,Original,Display,Kind,Renamed");
+        sb.AppendLine("Page,Visual,Table,Original,Display,Kind,Renamed");
         foreach (var f in rows)
-            sb.AppendLine(string.Join(",", Csv(f.Page), Csv(f.VisualLabel), Csv(f.OriginalName), Csv(f.DisplayName), Csv(f.KindText), Csv(f.RenamedText)));
+            sb.AppendLine(string.Join(",", Csv(f.Page), Csv(f.VisualLabel), Csv(f.Table), Csv(f.OriginalName), Csv(f.DisplayName), Csv(f.KindText), Csv(f.RenamedText)));
 
         try { File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(true)); }
         catch (Exception ex) { MessageBox.Show("Could not write file: " + ex.Message, "Export CSV"); }

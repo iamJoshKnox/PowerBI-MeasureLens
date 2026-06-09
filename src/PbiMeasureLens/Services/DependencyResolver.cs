@@ -30,7 +30,8 @@ public static class DependencyResolver
             Table = root.Table,
             Expression = root.Expression,
             SourceModel = root.ModelName,
-            Kind = DependencyKind.Measure
+            Kind = DependencyKind.Measure,
+            DefinitionCount = model.DefinitionCount(root.Name)
         };
         BuildChildren(node, root, model, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { root.Name });
         return node;
@@ -49,7 +50,8 @@ public static class DependencyResolver
                 continue;
             }
 
-            var m = model.FindMeasure(r.Name);
+            // Prefer a definition in the parent measure's own model (composite/chained correctness).
+            var m = model.FindMeasure(r.Name, def.ModelName);
             if (m != null)
             {
                 if (path.Contains(r.Name))
@@ -64,7 +66,8 @@ public static class DependencyResolver
                         Table = m.Table,
                         Expression = m.Expression,
                         SourceModel = m.ModelName,
-                        Kind = DependencyKind.Measure
+                        Kind = DependencyKind.Measure,
+                        DefinitionCount = model.DefinitionCount(m.Name)
                     };
                     BuildChildren(child, m, model, new HashSet<string>(path, StringComparer.OrdinalIgnoreCase) { m.Name });
                     node.Children.Add(child);

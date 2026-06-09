@@ -22,13 +22,38 @@
                 <StackPanel Orientation="Horizontal">
                     <Button Content="Open .pbix…" Click="OpenPbix_Click" />
                     <TextBlock x:Name="PbixPathText" VerticalAlignment="Center" Margin="6,0,0,0"
-                               Foreground="#444" Text="(no report loaded)" TextTrimming="CharacterEllipsis" MaxWidth="820" />
+                               Foreground="#444" Text="(no report loaded)" TextTrimming="CharacterEllipsis" MaxWidth="660" />
+                    <TextBlock x:Name="PbixStatusText" VerticalAlignment="Center" Margin="10,0,0,0"
+                               Foreground="#888" Text="" TextTrimming="CharacterEllipsis" MaxWidth="320" />
                 </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                    <Button Content="Add model folder…" Click="AddModelFolder_Click" />
-                    <Button Content="Clear" Click="ClearModelFolders_Click" />
-                    <TextBlock x:Name="ModelInfoText" VerticalAlignment="Center" Margin="6,0,0,0"
-                               Foreground="#444" Text="No semantic-model folders configured." TextTrimming="CharacterEllipsis" MaxWidth="900" />
+                <StackPanel Margin="0,6,0,0">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Add model folder…" Click="AddModelFolder_Click" />
+                        <Button Content="Add model file…" Click="AddModelFile_Click" />
+                        <Button Content="Clear all" Click="ClearModelFolders_Click" />
+                        <TextBlock x:Name="ModelInfoText" VerticalAlignment="Center" Margin="6,0,0,0"
+                                   Foreground="#444" Text="No semantic-model folders configured." TextTrimming="CharacterEllipsis" MaxWidth="820" />
+                    </StackPanel>
+                    <ItemsControl x:Name="ModelChips" Margin="0,4,0,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#E8F0FE" BorderBrush="#AAC4F0" BorderThickness="1"
+                                        CornerRadius="3" Margin="0,0,4,4" Padding="5,1">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                                   Foreground="#234" ToolTip="{Binding Path}" />
+                                        <Button Content="✕" Tag="{Binding Path}" Click="RemoveModel_Click"
+                                                Margin="5,0,0,0" Padding="3,0" FontSize="11"
+                                                Background="Transparent" BorderThickness="0"
+                                                ToolTip="Remove this model" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
             </StackPanel>
         </Border>
@@ -44,6 +69,9 @@
 
             <!-- Visuals -->
             <GroupBox Grid.Column="0" Header="Visuals">
+                <DockPanel>
+                    <CheckBox x:Name="HideSlicers" DockPanel.Dock="Top" Content="Hide slicers"
+                              Margin="2,0,2,4" Checked="HideSlicers_Changed" Unchecked="HideSlicers_Changed" />
                 <ListBox x:Name="VisualsList" SelectionChanged="VisualsList_SelectionChanged"
                          HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
@@ -61,6 +89,7 @@
                         </GroupStyle>
                     </ListBox.GroupStyle>
                 </ListBox>
+                </DockPanel>
             </GroupBox>
 
             <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="#EEE" />
@@ -89,6 +118,7 @@
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Page" Binding="{Binding Page}" Width="90" />
                             <DataGridTextColumn Header="Visual" Binding="{Binding VisualLabel}" Width="100" />
+                            <DataGridTextColumn Header="Table" Binding="{Binding Table}" Width="110" />
                             <DataGridTextColumn Header="Original" Binding="{Binding OriginalName}" Width="*" />
                             <DataGridTextColumn Header="Display name" Binding="{Binding DisplayName}" Width="*" />
                             <DataGridTextColumn Header="Kind" Binding="{Binding KindText}" Width="62" />
@@ -110,10 +140,9 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="1.4*" MinHeight="120" />
                             </Grid.RowDefinitions>
-                            <TextBox x:Name="DaxText" Grid.Row="0" IsReadOnly="True" TextWrapping="Wrap"
-                                     VerticalScrollBarVisibility="Auto" AcceptsReturn="True"
-                                     FontFamily="Cascadia Mono, Consolas, monospace" FontSize="12"
-                                     Text="Select a measure in the Fields grid to see its DAX." />
+                            <RichTextBox x:Name="DaxBox" Grid.Row="0" IsReadOnly="True"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                         FontFamily="Cascadia Mono, Consolas, monospace" FontSize="12.5" />
                             <TextBlock Grid.Row="1" Text="Dependency tree" FontWeight="Bold" Margin="2,6,2,2" Foreground="#666" />
                             <TreeView x:Name="DepTree" Grid.Row="2" SelectedItemChanged="DepTree_SelectedItemChanged">
                                 <TreeView.Resources>

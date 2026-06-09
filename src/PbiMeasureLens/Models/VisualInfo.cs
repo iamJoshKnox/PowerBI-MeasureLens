@@ -15,6 +15,9 @@ public sealed class VisualInfo
 
     public bool HasRenames => Fields.Any(f => f.IsRenamed);
 
+    /// <summary>True for slicer visuals (native and custom) — lets the UI optionally hide them.</summary>
+    public bool IsSlicer => VisualType.IndexOf("slicer", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
     /// <summary>Label shown in the visual picker list.</summary>
     public string Label
     {

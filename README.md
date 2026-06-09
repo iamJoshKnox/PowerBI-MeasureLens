@@ -19,8 +19,13 @@ It runs as a standalone `.exe` and can register itself in the **External Tools**
 
 ## How it works (and its limits)
 
-- The rename mapping is read from the report's `.pbix` layout — so **save the report first**;
-  the tool reads the saved file, not the live (unsaved) canvas.
+- The rename mapping is read from the saved report — so **save the report first**; the tool reads
+  the saved file, not the live (unsaved) canvas.
+- Both report formats are supported and auto-detected: the **classic** `.pbix` layout
+  (`Report/Layout`) and the modern **PBIR / enhanced report format** — a `.pbip` project, a
+  `.Report` folder, a `definition.pbir` file, or a newer `.pbix` that embeds the PBIR definition.
+- A status line reports what was parsed (`N visual(s) · M with fields`), and you get a warning
+  instead of a silent empty list when part of a report can't be read.
 - Visuals are chosen from a **list** the tool builds from the file (not by clicking the canvas).
 - DAX is read from local `.pbip` semantic-model files. Reports that live-connect to the Service
   still work, because you point the tool at the same model on disk. References that resolve only
@@ -86,7 +91,9 @@ can't hand the report path to a tool, so the app still opens a file picker on la
 
 ```
 src/PbiMeasureLens/        WPF app (.NET 8)
-  Services/PbixLayoutReader.cs    parse .pbix layout -> visuals + renames
+  Services/ReportReader.cs        detect format (classic vs PBIR) -> dispatch
+  Services/PbixLayoutReader.cs    parse classic .pbix layout -> visuals + renames
+  Services/PbirReportReader.cs    parse PBIR definition (visual.json) -> visuals + renames
   Services/TmdlModelReader.cs     parse .pbip TMDL -> measures + columns
   Services/DependencyResolver.cs  recursive measure dependency tree
 tooling/                   External Tools registration (.pbitool.json + install script)
