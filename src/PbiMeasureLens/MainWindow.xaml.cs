@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -96,14 +97,24 @@ public partial class MainWindow : Window
     private void AddModelFolder_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFolderDialog { Title = "Select a folder containing your .pbip semantic model(s)" };
-        if (_settings.SemanticModelRoots.Count > 0)
-        {
-            var last = _settings.SemanticModelRoots[^1];
-            if (Directory.Exists(last)) dlg.InitialDirectory = last;
-        }
+        var initial = LastModelBrowseDir();
+        if (initial != null) dlg.InitialDirectory = initial;
 
         if (dlg.ShowDialog() == true)
             AddModelRoots(new[] { dlg.FolderName });
+    }
+
+    /// <summary>
+    /// Where the model pickers should open: the *parent* of the last-added model, since semantic
+    /// models usually sit side by side in one folder — so the next pick is one click away.
+    /// </summary>
+    private string? LastModelBrowseDir()
+    {
+        if (_settings.SemanticModelRoots.Count == 0) return null;
+        var last = _settings.SemanticModelRoots[^1];
+        var parent = Path.GetDirectoryName(last.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent)) return parent;
+        return Directory.Exists(last) ? last : null;
     }
 
     private void AddModelFile_Click(object sender, RoutedEventArgs e)
@@ -113,8 +124,8 @@ public partial class MainWindow : Window
             Title = "Select a semantic model (.pbip / .pbir)",
             Filter = "Power BI model/project (*.pbip;*.pbir)|*.pbip;*.pbir|All files (*.*)|*.*"
         };
-        if (_settings.SemanticModelRoots.Count > 0 && Directory.Exists(_settings.SemanticModelRoots[^1]))
-            dlg.InitialDirectory = _settings.SemanticModelRoots[^1];
+        var initial = LastModelBrowseDir();
+        if (initial != null) dlg.InitialDirectory = initial;
 
         if (dlg.ShowDialog() == true)
         {
@@ -248,20 +259,35 @@ public partial class MainWindow : Window
             source = source.Where(f => f.VisualType.IndexOf("slicer", StringComparison.OrdinalIgnoreCase) < 0);
 
         string search = SearchBox.Text?.Trim() ?? "";
-        bool onlyRenamed = OnlyRenamed.IsChecked == true;
+        var matches = BuildMatcher(search); // compiled once per refresh, reused for every row/field
 
         var view = new ListCollectionView(source.ToList())
         {
             Filter = o =>
             {
                 if (o is not FieldMapping f) return false;
-                if (onlyRenamed && !f.IsRenamed) return false;
                 if (search.Length == 0) return true;
-                return Contains(f.OriginalName, search) || Contains(f.DisplayName, search)
-                    || Contains(f.Page, search) || Contains(f.VisualLabel, search) || Contains(f.Table, search);
+                return matches(f.OriginalName) || matches(f.DisplayName);
             }
         };
         FieldsGrid.ItemsSource = view;
+    }
+
+    /// <summary>
+    /// Build a case-insensitive matcher for the search box. A '*' acts as a wildcard
+    /// matching any run of characters (e.g. "Budget*Pounds"); without one it's a plain
+    /// substring search. The pattern is compiled once and reused across all rows.
+    /// </summary>
+    private static Func<string, bool> BuildMatcher(string search)
+    {
+        if (search.Length == 0) return _ => true;
+        if (!search.Contains('*')) return s => Contains(s, search);
+
+        // Glob: split on '*', escape the literal pieces, rejoin with ".*". Unanchored so it
+        // still matches anywhere in the value (consistent with the plain substring behaviour).
+        string pattern = string.Join(".*", search.Split('*').Select(Regex.Escape));
+        var rx = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return s => rx.IsMatch(s);
     }
 
     private static bool Contains(string haystack, string needle)
@@ -359,15 +385,18 @@ public partial class MainWindow : Window
 
     private void ShowDaxMeasure(MeasureNode node)
     {
-        var header = (string.IsNullOrEmpty(node.Table) ? $"[{node.Name}]" : $"{node.Table}[{node.Name}]") + " =";
-        if (!string.IsNullOrEmpty(node.SourceModel)) header += $"   (model: {node.SourceModel})";
+        var header = $"[{node.Name}] ="; // a measure is referenced bare, never table-qualified
+        var parts = new List<string>();
+        if (!string.IsNullOrEmpty(node.SourceModel)) parts.Add($"model: {node.SourceModel}");
+        if (!string.IsNullOrEmpty(node.Table)) parts.Add($"table: {node.Table}");
+        string? model = parts.Count > 0 ? "(" + string.Join("; ", parts) + ")" : null;
 
         string? note = node.IsAmbiguous
             ? $"⚠ {node.DefinitionCount} measures share this name across the scanned models; " +
               $"showing the one from {(string.IsNullOrEmpty(node.SourceModel) ? "the first model" : node.SourceModel)}."
             : null;
 
-        DaxBox.Document = DaxHighlighter.BuildMeasure(header, node.Expression, note);
+        DaxBox.Document = DaxHighlighter.BuildMeasure(header, node.Expression, note, model);
     }
 
     private void ClearMeasureDetail()
@@ -387,9 +416,29 @@ public partial class MainWindow : Window
         if (rows.Count == 0) { MessageBox.Show("No rows to copy.", "Copy"); return; }
 
         var sb = new StringBuilder();
-        sb.AppendLine("Page\tVisual\tTable\tOriginal\tDisplay\tKind\tRenamed");
+        sb.AppendLine("Page\tVisual\tTable\tOriginal\tDisplay\tKind");
         foreach (var f in rows)
-            sb.AppendLine($"{f.Page}\t{f.VisualLabel}\t{f.Table}\t{f.OriginalName}\t{f.DisplayName}\t{f.KindText}\t{f.RenamedText}");
+            sb.AppendLine($"{f.Page}\t{f.VisualLabel}\t{f.Table}\t{f.OriginalName}\t{f.DisplayName}\t{f.KindText}");
+
+        try { Clipboard.SetText(sb.ToString()); }
+        catch (Exception ex) { MessageBox.Show("Could not access the clipboard: " + ex.Message, "Copy"); }
+    }
+
+    private void CopyWithDax_Click(object sender, RoutedEventArgs e)
+    {
+        var rows = CurrentRows();
+        if (rows.Count == 0) { MessageBox.Show("No rows to copy.", "Copy"); return; }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Page\tVisual\tTable\tOriginal\tDisplay\tKind\tDAX");
+        foreach (var f in rows)
+        {
+            string dax = f.Kind == FieldKind.Measure
+                ? _model?.FindMeasure(f.OriginalName)?.Expression ?? ""
+                : "";
+            sb.AppendLine(string.Join("\t",
+                f.Page, f.VisualLabel, f.Table, f.OriginalName, f.DisplayName, f.KindText, TsvCell(dax)));
+        }
 
         try { Clipboard.SetText(sb.ToString()); }
         catch (Exception ex) { MessageBox.Show("Could not access the clipboard: " + ex.Message, "Copy"); }
@@ -409,9 +458,9 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog() != true) return;
 
         var sb = new StringBuilder();
-        sb.AppendLine("Page,Visual,Table,Original,Display,Kind,Renamed");
+        sb.AppendLine("Page,Visual,Table,Original,Display,Kind");
         foreach (var f in rows)
-            sb.AppendLine(string.Join(",", Csv(f.Page), Csv(f.VisualLabel), Csv(f.Table), Csv(f.OriginalName), Csv(f.DisplayName), Csv(f.KindText), Csv(f.RenamedText)));
+            sb.AppendLine(string.Join(",", Csv(f.Page), Csv(f.VisualLabel), Csv(f.Table), Csv(f.OriginalName), Csv(f.DisplayName), Csv(f.KindText)));
 
         try { File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(true)); }
         catch (Exception ex) { MessageBox.Show("Could not write file: " + ex.Message, "Export CSV"); }
@@ -423,6 +472,14 @@ public partial class MainWindow : Window
     private static string Csv(string value)
     {
         if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        return value;
+    }
+
+    /// <summary>Quote a tab-delimited clipboard cell so multi-line/tabbed DAX pastes into one Excel cell.</summary>
+    private static string TsvCell(string value)
+    {
+        if (value.Contains('\t') || value.Contains('\n') || value.Contains('\r') || value.Contains('"'))
             return "\"" + value.Replace("\"", "\"\"") + "\"";
         return value;
     }

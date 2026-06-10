@@ -27,11 +27,11 @@ public sealed class MeasureNode
 
     public string Display => Kind switch
     {
-        DependencyKind.Measure => (string.IsNullOrEmpty(Table) ? $"[{Name}]" : $"{Table}[{Name}]")
+        DependencyKind.Measure => $"[{Name}]" // measures are referenced bare, never table-qualified
                                   + (IsAmbiguous
                                         ? $"  ⚠ {DefinitionCount} models define this — using {(string.IsNullOrEmpty(SourceModel) ? "first" : SourceModel)}"
                                         : ""),
-        DependencyKind.Column => string.IsNullOrEmpty(Table) ? $"[{Name}]  (column)" : $"{Table}[{Name}]  (column)",
+        DependencyKind.Column => string.IsNullOrEmpty(Table) ? $"[{Name}]  (column)" : $"'{Table}'[{Name}]  (column)",
         DependencyKind.Unresolved => $"[{Name}]  (unresolved / external)",
         DependencyKind.Cycle => $"[{Name}]  (circular reference)",
         _ => Name

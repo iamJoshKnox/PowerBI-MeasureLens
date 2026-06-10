@@ -25,7 +25,9 @@ public sealed class FieldMapping
     public string VisualTitle { get; set; } = "";
 
     public string KindText => Kind == FieldKind.Measure ? "Measure" : "Column";
-    public string RenamedText => IsRenamed ? "Yes" : "";
-    public string Qualified => string.IsNullOrEmpty(Table) ? OriginalName : $"{Table}[{OriginalName}]";
+    // DAX-idiomatic reference: measures are bare [Name]; columns are 'Table'[Column].
+    public string Qualified => Kind == FieldKind.Measure || string.IsNullOrEmpty(Table)
+        ? $"[{OriginalName}]"
+        : $"'{Table}'[{OriginalName}]";
     public string VisualLabel => string.IsNullOrWhiteSpace(VisualTitle) ? VisualType : VisualTitle;
 }

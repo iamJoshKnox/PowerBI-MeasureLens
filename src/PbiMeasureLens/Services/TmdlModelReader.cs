@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace PbiMeasureLens.Services;
 
@@ -13,6 +14,18 @@ public sealed class MeasureDef
     public string Expression { get; init; } = "";
     public string SourceFile { get; init; } = "";
     public string ModelName { get; init; } = "";
+
+    /// <summary>TMDL lineageTag GUID — a stable object identity preserved when a model is surfaced.</summary>
+    public string LineageTag { get; set; } = "";
+
+    /// <summary>On a surfaced (DirectQuery) measure, the source object's lineageTag — links back to the real definition.</summary>
+    public string SourceLineageTag { get; set; } = "";
+
+    /// <summary>When this measure's table is DirectQuery-sourced from another model, that model's name.</summary>
+    public string RemoteSourceModel { get; set; } = "";
+
+    /// <summary>A surfaced proxy (e.g. EXTERNALMEASURE(...)) whose real DAX lives in another model.</summary>
+    public bool IsExternal => Expression.TrimStart().StartsWith("EXTERNALMEASURE", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -33,25 +46,77 @@ public sealed class TmdlModel
     /// Resolve a measure by name. When the name is defined in more than one model and
     /// <paramref name="preferModel"/> is given, prefer the definition in that model — so a measure's
     /// child references bind to its own model first (correct for composite/chained models).
+    /// Otherwise prefer the true source (a local definition) over a surfaced/remote copy.
     /// </summary>
     public MeasureDef? FindMeasure(string name, string? preferModel = null)
     {
         if (!MeasuresByName.TryGetValue(name, out var list) || list.Count == 0) return null;
+
         if (list.Count > 1 && !string.IsNullOrEmpty(preferModel))
         {
-            foreach (var m in list)
-                if (string.Equals(m.ModelName, preferModel, StringComparison.OrdinalIgnoreCase))
-                    return m;
+            var pref = list.FirstOrDefault(m => string.Equals(m.ModelName, preferModel, StringComparison.OrdinalIgnoreCase) && !m.IsExternal)
+                    ?? list.FirstOrDefault(m => string.Equals(m.ModelName, preferModel, StringComparison.OrdinalIgnoreCase));
+            if (pref != null) return pref;
         }
-        return list[0];
+        // The real definition lives where the measure has its actual DAX — not a surfaced EXTERNALMEASURE proxy.
+        return list.FirstOrDefault(m => !m.IsExternal && string.IsNullOrEmpty(m.RemoteSourceModel))
+            ?? list.FirstOrDefault(m => !m.IsExternal)
+            ?? list[0];
     }
 
-    public bool HasDuplicate(string name)
-        => MeasuresByName.TryGetValue(name, out var list) && list.Count > 1;
+    /// <summary>True only when the name maps to more than one *distinct logical* measure (a real conflict).</summary>
+    public bool HasDuplicate(string name) => DefinitionCount(name) > 1;
 
-    /// <summary>How many measures share this name across the scanned models (1 = unambiguous).</summary>
+    /// <summary>
+    /// Count of distinct logical measures sharing this name. Definitions that are the same measure
+    /// surfaced across models (shared lineageTag, a composite's DirectQuery source, or identical DAX)
+    /// collapse to one — so composite models don't read as duplicates.
+    /// </summary>
     public int DefinitionCount(string name)
-        => MeasuresByName.TryGetValue(name, out var list) ? list.Count : 0;
+        => MeasuresByName.TryGetValue(name, out var list) ? GroupLogical(list).Count : 0;
+
+    /// <summary>Greedy single-link grouping of definitions that represent the same logical measure.</summary>
+    private static List<List<MeasureDef>> GroupLogical(List<MeasureDef> list)
+    {
+        var groups = new List<List<MeasureDef>>();
+        foreach (var def in list)
+        {
+            var g = groups.FirstOrDefault(grp => grp.Any(o => SameLogicalMeasure(o, def)));
+            if (g != null) g.Add(def);
+            else groups.Add(new List<MeasureDef> { def });
+        }
+        return groups;
+    }
+
+    private static bool SameLogicalMeasure(MeasureDef a, MeasureDef b)
+    {
+        // 0. DirectQuery source lineage: a surfaced measure records the source object's lineageTag.
+        if (!string.IsNullOrEmpty(a.SourceLineageTag) &&
+            string.Equals(a.SourceLineageTag, b.LineageTag, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (!string.IsNullOrEmpty(b.SourceLineageTag) &&
+            string.Equals(b.SourceLineageTag, a.LineageTag, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // 1. Same TMDL object identity (lineageTag preserved through surfacing).
+        if (!string.IsNullOrEmpty(a.LineageTag) &&
+            string.Equals(a.LineageTag, b.LineageTag, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // 2. One is a composite surfacing the other (its table DirectQuerys that model).
+        if ((!string.IsNullOrEmpty(a.RemoteSourceModel) &&
+             string.Equals(a.RemoteSourceModel, b.ModelName, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrEmpty(b.RemoteSourceModel) &&
+             string.Equals(b.RemoteSourceModel, a.ModelName, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        // 3. Identical DAX (whitespace-insensitive) — a mirrored copy.
+        var ea = NormalizeDax(a.Expression);
+        return ea.Length > 0 && ea == NormalizeDax(b.Expression);
+    }
+
+    private static string NormalizeDax(string? expr)
+        => Regex.Replace(expr ?? "", @"\s+", " ").Trim().ToLowerInvariant();
 }
 
 /// <summary>Scans folders for *.SemanticModel/definition/tables/*.tmdl and parses measures + columns.</summary>
@@ -70,8 +135,9 @@ public static class TmdlModelReader
 
                 model.ScannedModelFolders.Add(md);
                 string modelName = ModelNameFromDir(md);
+                var exprToModel = LoadExpressionSourceModels(md);
                 foreach (var file in Directory.EnumerateFiles(tablesDir, "*.tmdl"))
-                    ParseFile(file, model, modelName);
+                    ParseFile(file, model, modelName, exprToModel);
             }
         }
         return model;
@@ -105,13 +171,15 @@ public static class TmdlModelReader
             : name;
     }
 
-    private static void ParseFile(string path, TmdlModel model, string modelName)
+    private static void ParseFile(string path, TmdlModel model, string modelName, Dictionary<string, string> exprToModel)
     {
         string[] lines;
         try { lines = File.ReadAllLines(path); }
         catch { return; }
 
         string currentTable = "";
+        var fileMeasures = new List<MeasureDef>();
+        MeasureDef? pendingMeasure = null; // the measure whose property block we're currently inside
 
         for (int i = 0; i < lines.Length; i++)
         {
@@ -121,11 +189,28 @@ public static class TmdlModelReader
             if (line.StartsWith("table ", StringComparison.Ordinal))
             {
                 currentTable = Unquote(line.Substring("table ".Length).Trim());
+                pendingMeasure = null;
             }
             else if (line.StartsWith("column ", StringComparison.Ordinal))
             {
                 string name = ReadName(line.Substring("column ".Length), out _);
                 if (!string.IsNullOrEmpty(name)) model.ColumnNames.Add(name);
+                pendingMeasure = null;
+            }
+            else if (line.StartsWith("partition ", StringComparison.Ordinal) ||
+                     line.StartsWith("hierarchy ", StringComparison.Ordinal))
+            {
+                pendingMeasure = null; // partitions are handled by the remote-source pass below
+            }
+            else if (pendingMeasure != null && line.StartsWith("sourceLineageTag", StringComparison.Ordinal))
+            {
+                var tag = ValueAfterColon(line);
+                if (!string.IsNullOrEmpty(tag)) pendingMeasure.SourceLineageTag = tag;
+            }
+            else if (pendingMeasure != null && line.StartsWith("lineageTag", StringComparison.Ordinal))
+            {
+                var tag = ValueAfterColon(line);
+                if (!string.IsNullOrEmpty(tag)) pendingMeasure.LineageTag = tag;
             }
             else if (line.StartsWith("measure ", StringComparison.Ordinal))
             {
@@ -155,11 +240,12 @@ public static class TmdlModelReader
                     }
                     else
                     {
-                        // Unfenced expression. Power BI inlines short ones, but hand-authored /
-                        // Tabular Editor TMDL can continue across deeper-indented lines with no fence.
-                        // Collect those continuation lines until a dedent or a known sub-property keyword.
+                        // Unfenced expression. Power BI inlines short ones, but multi-line measures
+                        // appear as deeper-indented lines after the '=' — often led by a blank line —
+                        // ending at a dedent or a known sub-property keyword.
                         var sb = new StringBuilder();
-                        if (exprStart.Length > 0) sb.AppendLine(exprStart);
+                        bool started = exprStart.Length > 0;
+                        if (started) sb.AppendLine(exprStart);
 
                         int measureIndent = IndentWidth(lines[i]);
                         int j = i + 1;
@@ -167,10 +253,15 @@ public static class TmdlModelReader
                         {
                             string raw = lines[j];
                             string trimmed = raw.TrimStart();
-                            if (trimmed.Length == 0) break;                 // blank line ends the value
+                            if (trimmed.Length == 0)
+                            {
+                                if (started) sb.AppendLine(); // keep internal blanks; skip leading ones
+                                continue;
+                            }
                             if (IndentWidth(raw) <= measureIndent) break;   // dedent to a sibling/parent
                             if (IsSubPropertyOrDecl(trimmed)) break;        // measure property or new object
                             sb.AppendLine(raw);
+                            started = true;
                         }
                         i = j - 1; // resume after the lines we consumed
 
@@ -188,12 +279,138 @@ public static class TmdlModelReader
                         SourceFile = path,
                         ModelName = modelName
                     };
-                    if (!model.MeasuresByName.TryGetValue(name, out var list))
-                        model.MeasuresByName[name] = list = new List<MeasureDef>();
-                    list.Add(def);
+                    // A surfaced EXTERNALMEASURE names its data-source expression; map it to the source model.
+                    if (def.IsExternal && ExtractExternalDataSource(expr) is string ds &&
+                        exprToModel.TryGetValue(ds, out var srcModel))
+                        def.RemoteSourceModel = srcModel;
+
+                    fileMeasures.Add(def);
+                    pendingMeasure = def; // its lineageTag (if any) follows on indented lines
                 }
             }
         }
+
+        // Second pass: map DirectQuery tables to their remote source model, then commit measures.
+        var remoteByTable = ExtractTableRemoteSources(lines, exprToModel);
+        foreach (var def in fileMeasures)
+        {
+            if (string.IsNullOrEmpty(def.RemoteSourceModel) && remoteByTable.TryGetValue(def.Table, out var remote))
+                def.RemoteSourceModel = remote;
+
+            if (!model.MeasuresByName.TryGetValue(def.Name, out var list))
+                model.MeasuresByName[def.Name] = list = new List<MeasureDef>();
+            list.Add(def);
+        }
+    }
+
+    /// <summary>
+    /// Maps each table to the remote semantic model its DirectQuery partition sources from, if any.
+    /// Tolerant of TMDL source shapes; primarily recognises an AnalysisServices.Database(..., "Model")
+    /// connection or a Catalog=… connection string.
+    /// </summary>
+    private static Dictionary<string, string> ExtractTableRemoteSources(string[] lines, Dictionary<string, string> exprToModel)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string currentTable = "";
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i].TrimStart();
+            if (line.Length == 0) continue;
+
+            if (line.StartsWith("table ", StringComparison.Ordinal))
+            {
+                currentTable = Unquote(line.Substring("table ".Length).Trim());
+            }
+            else if (line.StartsWith("partition ", StringComparison.Ordinal))
+            {
+                int partitionIndent = IndentWidth(lines[i]);
+                bool isDirectQuery = false;
+                string? remote = null;
+
+                int j = i + 1;
+                for (; j < lines.Length; j++)
+                {
+                    string raw = lines[j];
+                    string t = raw.TrimStart();
+                    if (t.Length == 0) continue;
+                    if (IndentWidth(raw) <= partitionIndent) break; // left the partition block
+
+                    if (t.StartsWith("mode:", StringComparison.Ordinal) &&
+                        t.IndexOf("directQuery", StringComparison.OrdinalIgnoreCase) >= 0)
+                        isDirectQuery = true;
+
+                    // entity-style: expressionSource: 'Name' -> look up the connection's catalog.
+                    if (t.StartsWith("expressionSource:", StringComparison.Ordinal))
+                    {
+                        var exprName = Unquote(ValueAfterColon(t)?.Trim() ?? "");
+                        if (exprName.Length > 0 && exprToModel.TryGetValue(exprName, out var mdl)) remote = mdl;
+                    }
+                    remote ??= TryExtractRemoteModel(t); // inline AnalysisServices.Database / Catalog=
+                }
+                i = j - 1;
+
+                if (isDirectQuery && remote != null && currentTable.Length > 0)
+                    map[currentTable] = remote;
+            }
+        }
+        return map;
+    }
+
+    /// <summary>Parse definition/expressions.tmdl: expression name -> remote model (catalog) it connects to.</summary>
+    private static Dictionary<string, string> LoadExpressionSourceModels(string modelDir)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var file = Path.Combine(modelDir, "definition", "expressions.tmdl");
+        if (!File.Exists(file)) return map;
+
+        string[] lines;
+        try { lines = File.ReadAllLines(file); }
+        catch { return map; }
+
+        string? current = null;
+        foreach (var raw in lines)
+        {
+            var t = raw.TrimStart();
+            if (t.StartsWith("expression ", StringComparison.Ordinal))
+            {
+                current = ReadName(t.Substring("expression ".Length), out _);
+            }
+            else if (current != null)
+            {
+                var m = AnalysisServicesDb.Match(t);
+                if (m.Success) { map[current] = m.Groups[1].Value.Trim(); current = null; }
+            }
+        }
+        return map;
+    }
+
+    private static readonly Regex AnalysisServicesDb =
+        new("AnalysisServices\\.Database\\s*\\(\\s*\"[^\"]*\"\\s*,\\s*\"([^\"]+)\"", RegexOptions.Compiled);
+    private static readonly Regex CatalogName =
+        new("(?:Initial\\s+Catalog|Catalog)\\s*=\\s*\"?([^\";\\]]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex QuotedString = new("\"([^\"]*)\"", RegexOptions.Compiled);
+
+    private static string? TryExtractRemoteModel(string line)
+    {
+        var m = AnalysisServicesDb.Match(line);
+        if (m.Success) return m.Groups[1].Value.Trim();
+        var c = CatalogName.Match(line);
+        if (c.Success) return c.Groups[1].Value.Trim();
+        return null;
+    }
+
+    /// <summary>The last quoted string in an EXTERNALMEASURE(...) call — its data-source expression name.</summary>
+    private static string? ExtractExternalDataSource(string expr)
+    {
+        var ms = QuotedString.Matches(expr);
+        return ms.Count > 0 ? ms[ms.Count - 1].Groups[1].Value : null;
+    }
+
+    private static string? ValueAfterColon(string line)
+    {
+        int c = line.IndexOf(':');
+        return c >= 0 ? line.Substring(c + 1).Trim() : null;
     }
 
     /// <summary>Reads a possibly single-quoted TMDL identifier from the start of <paramref name="s"/>.</summary>
@@ -243,8 +460,8 @@ public static class TmdlModelReader
     // TMDL measure sub-properties and object declarations that mark the end of an unfenced expression.
     private static readonly string[] StopTokens =
     {
-        "formatString", "formatStringDefinition", "lineageTag", "displayFolder", "description",
-        "isHidden", "dataType", "annotation", "changedProperty", "extendedProperty",
+        "formatString", "formatStringDefinition", "lineageTag", "sourceLineageTag", "displayFolder",
+        "description", "isHidden", "dataType", "annotation", "changedProperty", "extendedProperty",
         "detailRowsDefinition", "kpi", "dataCategory", "relatedColumnDetails", "calculationItem",
         "measure ", "column ", "table ", "partition ", "hierarchy ", "relationship", "variation",
     };

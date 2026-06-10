@@ -20,6 +20,7 @@ public static class DaxHighlighter
     private static readonly Brush Reference = Hex("#267F99"); // teal — [col]/[measure] and 'table'
     private static readonly Brush Plain = Hex("#2B2B2B");
     private static readonly Brush HeaderBrush = Hex("#1A1A1A");
+    private static readonly Brush ModelBrush = Hex("#6A6A6A"); // muted gray
     private static readonly Brush NoteBrush = Hex("#B26A00"); // amber
 
     private static readonly HashSet<string> Keywords = new(StringComparer.OrdinalIgnoreCase)
@@ -28,19 +29,27 @@ public static class DaxHighlighter
         "TABLE", "ORDER", "BY", "START", "AT", "ASC", "DESC", "TRUE", "FALSE",
     };
 
-    /// <summary>A measure: bold header line, an optional amber note, then the highlighted DAX.</summary>
-    public static FlowDocument BuildMeasure(string header, string dax, string? note = null)
+    /// <summary>
+    /// A measure rendered as a context block then the definition: optional amber note (warning),
+    /// optional muted model line, then the bold header and the highlighted DAX.
+    /// </summary>
+    public static FlowDocument BuildMeasure(string header, string dax, string? note = null, string? model = null)
     {
         var doc = NewDoc();
-        doc.Blocks.Add(new Paragraph(new Run(header) { FontWeight = FontWeights.SemiBold, Foreground = HeaderBrush })
-        {
-            Margin = new Thickness(0, 0, 0, 6)
-        });
         if (!string.IsNullOrEmpty(note))
             doc.Blocks.Add(new Paragraph(new Run(note) { Foreground = NoteBrush, FontStyle = FontStyles.Italic })
             {
-                Margin = new Thickness(0, 0, 0, 6)
+                Margin = new Thickness(0, 0, 0, 2)
             });
+        if (!string.IsNullOrEmpty(model))
+            doc.Blocks.Add(new Paragraph(new Run(model) { Foreground = ModelBrush })
+            {
+                Margin = new Thickness(0, 0, 0, 10) // blank-line gap before the definition
+            });
+        doc.Blocks.Add(new Paragraph(new Run(header) { FontWeight = FontWeights.SemiBold, Foreground = HeaderBrush })
+        {
+            Margin = new Thickness(0, 0, 0, 4)
+        });
         doc.Blocks.Add(HighlightParagraph(dax ?? ""));
         return doc;
     }

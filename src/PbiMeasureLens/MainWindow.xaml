@@ -100,14 +100,13 @@
                     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                         <StackPanel Orientation="Horizontal">
                             <Button Content="Copy table" Click="Copy_Click" />
-                            <Button Content="Export CSV…" Click="ExportCsv_Click" />
+                            <Button Content="Copy table + DAX" Click="CopyWithDax_Click" Margin="6,0,0,0" />
+                            <Button Content="Export CSV…" Click="ExportCsv_Click" Margin="6,0,0,0" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                             <TextBlock Text="Search:" VerticalAlignment="Center" Margin="0,0,4,0" />
                             <TextBox x:Name="SearchBox" Width="170" VerticalAlignment="Center"
                                      TextChanged="Filter_Changed" />
-                            <CheckBox x:Name="OnlyRenamed" Content="Only renamed" VerticalAlignment="Center"
-                                      Margin="10,0,0,0" Checked="Filter_Changed" Unchecked="Filter_Changed" />
                             <CheckBox x:Name="WholeReport" Content="Whole report" VerticalAlignment="Center"
                                       Margin="10,0,0,0" Checked="Filter_Changed" Unchecked="Filter_Changed" />
                         </StackPanel>
@@ -116,13 +115,12 @@
                               SelectionMode="Single" SelectionChanged="FieldsGrid_SelectionChanged"
                               GridLinesVisibility="Horizontal" HeadersVisibility="Column" CanUserAddRows="False">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Page" Binding="{Binding Page}" Width="90" />
-                            <DataGridTextColumn Header="Visual" Binding="{Binding VisualLabel}" Width="100" />
-                            <DataGridTextColumn Header="Table" Binding="{Binding Table}" Width="110" />
-                            <DataGridTextColumn Header="Original" Binding="{Binding OriginalName}" Width="*" />
+                            <DataGridTextColumn Header="Page" Binding="{Binding Page}" Width="45" />
+                            <DataGridTextColumn Header="Visual" Binding="{Binding VisualLabel}" Width="45" />
+                            <DataGridTextColumn Header="Table" Binding="{Binding Table}" Width="45" />
+                            <DataGridTextColumn Header="Original name" Binding="{Binding OriginalName}" Width="*" />
                             <DataGridTextColumn Header="Display name" Binding="{Binding DisplayName}" Width="*" />
-                            <DataGridTextColumn Header="Kind" Binding="{Binding KindText}" Width="62" />
-                            <DataGridTextColumn Header="Renamed" Binding="{Binding RenamedText}" Width="66" />
+                            <DataGridTextColumn Header="Kind" Binding="{Binding KindText}" Width="55" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
@@ -132,6 +130,49 @@
 
             <!-- Measure detail: DAX/deps + Footprint -->
             <GroupBox Grid.Column="4" Header="Measure detail">
+                <DockPanel>
+                    <!-- Selected field context: a distinct block that updates with the Fields grid selection -->
+                    <Border DockPanel.Dock="Top" DataContext="{Binding SelectedItem, ElementName=FieldsGrid}"
+                            Background="#EAF2FB" BorderBrush="#B8D2F0" BorderThickness="1"
+                            CornerRadius="3" Padding="6" Margin="0,0,0,6">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <Trigger Property="DataContext" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.Resources>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Margin" Value="0,1,0,1" />
+                                </Style>
+                            </Grid.Resources>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Page" HorizontalAlignment="Right" FontWeight="Bold" Foreground="#555" Margin="0,1,10,1" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Page}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Table" HorizontalAlignment="Right" FontWeight="Bold" Foreground="#555" Margin="0,1,10,1" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Table}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Visual" HorizontalAlignment="Right" FontWeight="Bold" Foreground="#555" Margin="0,1,10,1" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding VisualLabel}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Original name" HorizontalAlignment="Right" FontWeight="Bold" Foreground="#555" Margin="0,1,10,1" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding OriginalName}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Display name" HorizontalAlignment="Right" FontWeight="Bold" Foreground="#555" Margin="0,1,10,1" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding DisplayName}" TextWrapping="Wrap" />
+                        </Grid>
+                    </Border>
                 <TabControl>
                     <TabItem Header="DAX &amp; dependencies">
                         <Grid>
@@ -197,6 +238,7 @@
                         </Grid>
                     </TabItem>
                 </TabControl>
+                </DockPanel>
             </GroupBox>
         </Grid>
     </DockPanel>
