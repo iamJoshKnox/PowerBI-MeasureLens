@@ -109,6 +109,9 @@
                                      TextChanged="Filter_Changed" />
                             <CheckBox x:Name="WholeReport" Content="Whole report" VerticalAlignment="Center"
                                       Margin="10,0,0,0" Checked="Filter_Changed" Unchecked="Filter_Changed" />
+                            <CheckBox x:Name="NameDiffOnly" Content="Display name differences" VerticalAlignment="Center"
+                                      Margin="10,0,0,0" Checked="Filter_Changed" Unchecked="Filter_Changed"
+                                      ToolTip="Show only fields whose original name is used with more than one display name" />
                         </StackPanel>
                     </StackPanel>
                     <DataGrid x:Name="FieldsGrid" AutoGenerateColumns="False" IsReadOnly="True"

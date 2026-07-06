@@ -258,6 +258,17 @@ public partial class MainWindow : Window
         if (whole && hideSlicers)
             source = source.Where(f => f.VisualType.IndexOf("slicer", StringComparison.OrdinalIgnoreCase) < 0);
 
+        if (NameDiffOnly.IsChecked == true)
+        {
+            var rows = source.ToList();
+            var conflicted = rows
+                .GroupBy(f => (f.Kind, f.Table, f.OriginalName))
+                .Where(g => g.Select(f => f.DisplayName).Distinct().Count() > 1)
+                .Select(g => g.Key)
+                .ToHashSet();
+            source = rows.Where(f => conflicted.Contains((f.Kind, f.Table, f.OriginalName)));
+        }
+
         string search = SearchBox.Text?.Trim() ?? "";
         var matches = BuildMatcher(search); // compiled once per refresh, reused for every row/field
 
